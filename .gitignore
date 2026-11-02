@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+vendor/
+.pub-cache/
+.build/
+.dart_tool/
+.build/
+
+# Build artifacts
+build/
+*.apk
+*.aab
+*.ipa
+*.appx
+*.msix
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Docker (local)
+docker-compose.override.yml
+docker/local/*.key
+docker/local/*.pem
+
+# Testing
+coverage/
+
+# Generated files
+**/generated/
+**/pb.dart
+**/freezed.dart
+**/g.dart
+
+# OrcaSlicer outputs
+/data/gcode/
