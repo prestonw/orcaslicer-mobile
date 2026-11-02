@@ -1,0 +1,5 @@
+package com.preston.orcaslicer
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()
