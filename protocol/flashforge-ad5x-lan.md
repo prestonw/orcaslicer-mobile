@@ -7,11 +7,18 @@ attempts of a 25.25 MB gcode) + live probe while the printer was BUILDING.
 
 - TCP **8899**, raw serial-over-TCP. NOT HTTP, NOT OctoPrint (port 80 is
   refused; 8898 answers 404/empty to HTTP and is not the protocol port).
-- Commands: `~` + G-code + `\n\n` (some captures show the app sends
-  `~M601 S1\n\n`).
+- Framing (verified byte-for-byte from the capture):
+  - status/query commands: `~Mxxx\r\n\n` (CRLF + blank line)
+  - `~M28` and `~M23`: `~Mxxx ...\n` (single LF only)
+  - Both framings are accepted by the printer; CRLF works for everything
+    (tested live: M119/M105 with \r\n\n).
 - Every response ends with a line `ok\r\n` (printer uses CRLF).
-- Flash Studio uses short-lived connections: one per command burst. The
-  successful upload used ONE connection for M28 + data + M29.
+- Flash Studio uses **short-lived connections: one per phase** —
+  M601+M115+M640+M119 on one connection; M28+data on a second; M29 on a
+  third; M23 on a fourth. M29/M23 connections carry ONLY the command
+  (no M601 handshake).
+- `~M640` is sent after M115; response `CMD M640 \r\n\n Received.\r\nok\r\n`
+  (purpose unclear, harmless).
 
 ## Handshake (must precede everything on a new connection)
 

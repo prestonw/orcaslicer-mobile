@@ -151,6 +151,17 @@ class FlashforgePrinter {
     );
   }
 
+  /// `~M114` — live toolhead position: "X:92.148 Y:110.801 Z:41.600 A:8986 B:0"
+  /// The Z value is the real progress signal (compare against the max Z in
+  /// the uploaded gcode).
+  Future<({double x, double y, double z})?> position() async {
+    final r = await send('~M114');
+    final m = RegExp(r'X:([\d.-]+)\s+Y:([\d.-]+)\s+Z:([\d.-]+)').firstMatch(r);
+    if (m == null) return null;
+    double d(int i) => double.tryParse(m!.group(i)!) ?? 0;
+    return (x: d(1), y: d(2), z: d(3));
+  }
+
   /// `~M119` — live machine state.
   Future<({String machineStatus, String moveMode, bool ledOn,
           String currentFile})?>

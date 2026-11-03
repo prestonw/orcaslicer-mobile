@@ -24,7 +24,17 @@ class _PrinterControlScreenState extends State<PrinterControlScreen> {
         }
 
         final printer = manager.selectedPrinter!;
-        final progress = manager.estimateProgress();
+        final realProgress = manager.estimateProgress(); // null = unknown
+        // Real Z-based progress when available, else elapsed-time estimate.
+        final double progress;
+        final String progressLabel;
+        if (realProgress != null) {
+          progress = realProgress;
+          progressLabel = '${(realProgress * 100).toStringAsFixed(0)}% (Z: ${printer.zPosition.toStringAsFixed(1)}mm)';
+        } else {
+          progress = 0.0;
+          progressLabel = printer.printing ? 'Printing (Z-based progress not available)' : printer.statusLabel;
+        }
         
         return Scaffold(
           appBar: AppBar(
@@ -90,7 +100,7 @@ class _PrinterControlScreenState extends State<PrinterControlScreen> {
                           ),
                         const SizedBox(height: 12),
                         LinearProgressIndicator(
-                          value: printer.printing ? progress : 0.0,
+                          value: progress,
                           minHeight: 8,
                           borderRadius: BorderRadius.circular(4),
                         ),
@@ -98,9 +108,7 @@ class _PrinterControlScreenState extends State<PrinterControlScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(printer.printing
-                                ? '${(progress * 100).toStringAsFixed(0)}% (time estimate)'
-                                : printer.statusLabel),
+                            Text(progressLabel),
                             Text('Mode: ${printer.moveMode}'),
                           ],
                         ),

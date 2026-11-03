@@ -154,6 +154,13 @@ class PrinterManager extends ChangeNotifier {
           bedTarget: t.bedTarget,
         );
       }
+      // M114 Z position = real progress (when maxZ is known from the file).
+      if (st != null && st.machineStatus == 'BUILDING') {
+        try {
+          final pos = await conn.position();
+          if (pos != null) printer.applyM114(zPosition: pos.z);
+        } catch (_) {}
+      }
       notifyListeners();
     } catch (_) {
       // Socket died mid-poll — the listener's onDone path handles it;
@@ -213,6 +220,10 @@ class PrinterManager extends ChangeNotifier {
     if (conn == null || !conn.isOpen || printer == null) {
       throw Exception('No printer connected');
     }
+    // Scan the gcode for the max Z so we can report real (Z-based) progress.
+    final maxZ = _scanMaxZ(file);
+    if (maxZ != null) printer.applyM114(zPosition: printer.zPosition, maxZ: maxZ);
+
     // Pause the poll loop for the duration of the transfer; the upload owns
     // the socket and polling would race it.
     _pollTimer?.cancel();
@@ -245,18 +256,30 @@ class PrinterManager extends ChangeNotifier {
     }
   }
 
-  /// Estimated progress 0.0-1.0 while printing.
-  ///
-  /// The AD5X M119 reports MachineStatus but NOT layer/percent, so we
-  /// estimate from elapsed time since BUILDING started. Callers with a known
-  /// total print duration ([knownTotalSeconds]) should pass it for accuracy;
-  /// otherwise we cap at a conservative default.
-  double estimateProgress({int knownTotalSeconds = 4 * 3600}) {
-    final start = _printStartedAt;
-    if (start == null || _selectedPrinter == null) return 0.0;
-    if (!(_selectedPrinter!.printing)) return 0.0;
-    final elapsed = DateTime.now().difference(start).inSeconds;
-    return (elapsed / knownTotalSeconds).clamp(0.0, 1.0);
+  /// Real progress 0.0-1.0 while printing: live Z position (M114) over the
+  /// max Z in the uploaded gcode. Null when unknown — UI shows elapsed time.
+  double? estimateProgress() {
+    final p = _selectedPrinter;
+    if (p == null) return null;
+    return p.zProgress;
+  }
+
+  /// Scan a gcode file for the largest Z coordinate (progress denominator).
+  double? _scanMaxZ(File file) {
+    try {
+      double maxZ = 0;
+      for (final line in file.readAsLinesSync()) {
+        if (!line.contains('Z')) continue;
+        final m = RegExp(r'Z(\d+\.?\d*)').firstMatch(line);
+        if (m != null) {
+          final z = double.tryParse(m.group(1)!);
+          if (z != null && z > maxZ) maxZ = z;
+        }
+      }
+      return maxZ > 0 ? maxZ : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   // ----------------------------------------------------------------

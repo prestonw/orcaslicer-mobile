@@ -23,6 +23,8 @@ class Printer {
   double _hotendTarget = 0.0;
   double _bedTemp = 0.0;
   double _bedTarget = 0.0;
+  double _zPosition = 0.0;
+  double? _maxZ; // from the uploaded gcode (scan) — real progress = z/maxZ
 
   Printer({
     required this.id,
@@ -45,6 +47,8 @@ class Printer {
   double get hotendTarget => _hotendTarget;
   double get bedTemp => _bedTemp;
   double get bedTarget => _bedTarget;
+  double get zPosition => _zPosition;
+  double? get maxZ => _maxZ;
 
   /// True while actively printing (M119 MachineStatus == BUILDING).
   bool get printing => _machineStatus == 'BUILDING';
@@ -80,6 +84,19 @@ class Printer {
     _moveMode = moveMode;
     _ledOn = ledOn;
     _currentFile = currentFile;
+  }
+
+  void applyM114({required double zPosition, double? maxZ}) {
+    _online = true;
+    _zPosition = zPosition;
+    if (maxZ != null && maxZ > 0) _maxZ = maxZ;
+  }
+
+  /// Real progress from Z position, or null if maxZ unknown / not printing.
+  double? get zProgress {
+    final m = _maxZ;
+    if (m == null || m <= 0 || _machineStatus != 'BUILDING') return null;
+    return (_zPosition / m).clamp(0.0, 1.0);
   }
 
   void applyM105({
