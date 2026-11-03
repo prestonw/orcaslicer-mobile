@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../managers/printer_manager.dart';
 import 'printer_setup_screen.dart';
 import 'print_queue_screen.dart';
+import 'printer_control_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -119,17 +120,31 @@ class _PrintersList extends StatelessWidget {
         
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
+          color: isSelected ? const Color(0xFF2A2F3A) : null,
           child: InkWell(
-            onTap: () {
-              // Navigate to printer control (future screen)
+            onTap: () async {
+              final manager = context.read<PrinterManager>();
+              await manager.connectToPrinter(printer);
+              if (!context.mounted) return;
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const PrinterControlScreen(),
+                ),
+              );
             },
             child: ListTile(
               leading: CircleAvatar(
                 backgroundColor: printer.online ? Colors.green : Colors.grey,
                 child: const Icon(Icons.print, color: Colors.white),
               ),
-              title: Text(printer.name),
-              subtitle: Text('${printer.ip}:${printer.port}'),
+              title: Text(
+                printer.name,
+                style: const TextStyle(color: Colors.white),
+              ),
+              subtitle: Text(
+                '${printer.ip}:${printer.port}',
+                style: const TextStyle(color: Colors.white70),
+              ),
               trailing: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -144,9 +159,6 @@ class _PrintersList extends StatelessWidget {
                     ),
                 ],
               ),
-              onTap: () {
-                // Select this printer
-              },
             ),
           ),
         );

@@ -14,7 +14,7 @@ class PrinterSetupScreen extends StatefulWidget {
 class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _ipController = TextEditingController();
-  final _portController = TextEditingController(text: '80');
+  final _portController = TextEditingController(text: '8899');
   final _deviceIDController = TextEditingController();
   final _nameController = TextEditingController();
   
@@ -129,9 +129,13 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                 const SizedBox(height: 24),
                 TextFormField(
                   controller: _ipController,
+                  style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(
                     labelText: 'IP Address',
                     hintText: '192.168.1.100',
+                    labelStyle: TextStyle(color: Colors.white),
+                    hintStyle: TextStyle(color: Colors.white70),
+                    helperStyle: TextStyle(color: Colors.white70),
                     prefixIcon: Icon(Icons.cloud),
                     helperText: 'Local IP of your AD5X printer',
                   ),
@@ -150,8 +154,12 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _portController,
+                  style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(
                     labelText: 'Port',
+                    labelStyle: TextStyle(color: Colors.white),
+                    hintStyle: TextStyle(color: Colors.white70),
+                    helperStyle: TextStyle(color: Colors.white70),
                     prefixIcon: Icon(Icons.settings_input_antenna),
                   ),
                   keyboardType: TextInputType.number,
@@ -169,9 +177,13 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _deviceIDController,
+                  style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(
                     labelText: 'Device ID',
                     hintText: 'Printer serial number',
+                    labelStyle: TextStyle(color: Colors.white),
+                    hintStyle: TextStyle(color: Colors.white70),
+                    helperStyle: TextStyle(color: Colors.white70),
                     prefixIcon: Icon(Icons.device_hub),
                   ),
                   validator: (value) {
@@ -184,9 +196,13 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _nameController,
+                  style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(
                     labelText: 'Name (optional)',
                     hintText: 'My AD5X',
+                    labelStyle: TextStyle(color: Colors.white),
+                    hintStyle: TextStyle(color: Colors.white70),
+                    helperStyle: TextStyle(color: Colors.white70),
                     prefixIcon: Icon(Icons.label),
                   ),
                 ),

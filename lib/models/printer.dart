@@ -8,7 +8,7 @@ class Printer {
   final String deviceID;
   final String name;
   final String ip;
-  final int port;
+  int port;
   String? firmware;
   String? serial;
   String? machineType;
@@ -25,6 +25,26 @@ class Printer {
   double _bedTarget = 0.0;
   double _zPosition = 0.0;
   double? _maxZ; // from the uploaded gcode (scan) — real progress = z/maxZ
+
+  /// Model preview PNG bytes (decoded from the gcode's embedded thumbnail
+  /// block); null when the file had no preview or it hasn't been scanned yet.
+  List<int>? modelImage;
+
+  // M27 — real print progress while the SD file is playing (byte + layer).
+  int _sdBytePos = 0;
+  int _sdTotalBytes = 0;
+  int _sdLayer = 0;
+  int _sdTotalLayers = 0;
+
+  // Build-plate endstops from M119 (mm): "Endstop: X-max: 110 Y-max: 110 Z-min: 0".
+  double? _xMax;
+  double? _yMax;
+  double? _zMin;
+
+  /// Total print duration (seconds) from the gcode header
+  /// ("estimated printing time (normal mode) = 6h 5m 49s") or the
+  /// "6h6m" token in the current file name — basis for the time-left estimate.
+  double? estimatedTotalSeconds;
 
   Printer({
     required this.id,
@@ -49,9 +69,43 @@ class Printer {
   double get bedTarget => _bedTarget;
   double get zPosition => _zPosition;
   double? get maxZ => _maxZ;
+  int get sdBytePos => _sdBytePos;
+  int get sdTotalBytes => _sdTotalBytes;
+  int get sdLayer => _sdLayer;
+  int get sdTotalLayers => _sdTotalLayers;
+  double? get xMax => _xMax;
+  double? get yMax => _yMax;
+  double? get zMin => _zMin;
+
+  /// Real progress 0..1 from M27 (SD byte position), or null when unknown.
+  double? get sdProgress {
+    if (_sdTotalBytes <= 0) return null;
+    return (_sdBytePos / _sdTotalBytes).clamp(0.0, 1.0);
+  }
 
   /// True while actively printing (M119 MachineStatus == BUILDING).
   bool get printing => _machineStatus == 'BUILDING';
+
+  /// Combined progress 0..1 (M27 byte % preferred, Z-estimate fallback).
+  double? get progress => sdProgress ?? zProgress;
+
+  /// Estimated seconds remaining — the slicer's total duration scaled by
+  /// (1 - progress), the same idea the printer's own countdown uses.
+  /// Null when the total or the progress is unknown, or not printing.
+  double? get estimatedRemainingSeconds {
+    final total = estimatedTotalSeconds;
+    final p = progress;
+    if (total == null || total <= 0 || p == null) return null;
+    if (_machineStatus != 'BUILDING') return null;
+    return (total * (1.0 - p)).clamp(0.0, total);
+  }
+
+  /// Estimated finish wall-clock time (now + remaining).
+  DateTime? get estimatedFinishAt {
+    final r = estimatedRemainingSeconds;
+    if (r == null) return null;
+    return DateTime.now().add(Duration(seconds: r.round()));
+  }
 
   /// Human label for the machine status.
   String get statusLabel {
@@ -78,12 +132,32 @@ class Printer {
     required String moveMode,
     required bool ledOn,
     required String currentFile,
+    double? xMax,
+    double? yMax,
+    double? zMin,
   }) {
     _online = true;
     _machineStatus = machineStatus;
     _moveMode = moveMode;
     _ledOn = ledOn;
     _currentFile = currentFile;
+    if (xMax != null) _xMax = xMax;
+    if (yMax != null) _yMax = yMax;
+    if (zMin != null) _zMin = zMin;
+  }
+
+  /// M27: "SD printing byte 53/100" + "Layer: 303/674".
+  void applyM27({
+    required int bytePos,
+    required int totalBytes,
+    int? layer,
+    int? totalLayers,
+  }) {
+    _online = true;
+    _sdBytePos = bytePos;
+    _sdTotalBytes = totalBytes;
+    if (layer != null) _sdLayer = layer;
+    if (totalLayers != null) _sdTotalLayers = totalLayers;
   }
 
   void applyM114({required double zPosition, double? maxZ}) {

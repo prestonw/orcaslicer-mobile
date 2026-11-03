@@ -1,4 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Raw TCP to the printer over Wi-Fi LAN (port 8899). Without this
+         Socket.connect throws a SecurityException and the printer looks
+         permanently offline. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <application
         android:label="orcaslicer"
         android:name="${applicationName}"

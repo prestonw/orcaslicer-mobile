@@ -56,6 +56,25 @@ recv (printing):MachineStatus: BUILDING  MoveMode: MOVING  Status: S:1 L:0 J:0 F
 Fields: MachineStatus, MoveMode, Status flags (S/L/J/F), LED (on=1),
 CurrentFile.
 
+The printing reply also carries build-plate endstops (verified live):
+
+```
+Endstop: X-max: 110 Y-max: 110 Z-min: 0
+```
+
+## Print progress — M27 (safe read-only while BUILDING)
+
+```
+send: ~M27\n\n
+recv: CMD M27 Received.\r\nSD printing byte 65/100\r\nLayer: 374/674\r\nok\r\n
+```
+`byte N/100` is a real 0–100 percentage (NOT raw bytes), `Layer: n/total`
+is the live layer. No time field — remaining time must be estimated:
+total duration comes from the gcode header
+(`; estimated printing time (normal mode) = 6h 5m 49s`) or the filename
+token (`6h6m`), remaining = total × (1 − progress). The printer's own
+2h25m readout matches this model (verified 2026-11-03: ~61% → est 2h24m).
+
 ## File upload (verified: 25,462,xxx → done + selected)
 
 ```

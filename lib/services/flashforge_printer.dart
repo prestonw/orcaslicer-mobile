@@ -12,6 +12,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 class FlashforgePrinter {
   final String host;
@@ -34,7 +35,11 @@ class FlashforgePrinter {
     _socket = await Socket.connect(host, port,
         timeout: Duration(milliseconds: timeoutMs));
     _socket!.setOption(SocketOption.tcpNoDelay, true);
-    _sub = _socket!.listen(_onData, onDone: _onDone, onError: (Object e) {});
+    _sub = _socket!.listen(_onData,
+        onDone: _onDone,
+        onError: (Object e) {
+      debugPrint('[FF] socket error: $e');
+    });
   }
 
   void dispose() {
@@ -46,6 +51,7 @@ class FlashforgePrinter {
   void _onDone() {
     _socket = null;
     final p = _pendingAck;
+    _pendingAck = null;
     if (p != null && !p.isCompleted) p.complete(false);
   }
 
@@ -84,8 +90,11 @@ class FlashforgePrinter {
   void _completeWith(List<int> payload) {
     final p = _pendingAck;
     if (p != null && !p.isCompleted) {
-      _pendingAck!.complete(true);
       _lastResponse = utf8.decode(payload, allowMalformed: true);
+      p.complete(true);
+      // MUST reset, or the next send() sees a non-null (completed) completer
+      // and throws "Command already in flight" forever.
+      _pendingAck = null;
     }
   }
 
@@ -123,10 +132,17 @@ class FlashforgePrinter {
   // ------------------------------------------------------------------
 
   /// `~M601 S1` — required handshake on every fresh connection.
-  /// Returns true on "Control Success".
+  ///
+  /// "Control Success" = machine is idle and accepted control. "Control
+  /// failed" = machine is busy (e.g. currently BUILDING) — but it is ALIVE
+  /// and still answering the protocol. Either way the printer is reachable,
+  /// so gate connection liveness on a protocol ack, not the idle-only result.
   Future<bool> handshake() async {
     final r = await send('~M601 S1');
-    return r.contains('Control Success');
+    debugPrint('[FF] handshake: $r');
+    return r.contains('Control Success') ||
+        r.contains('Control failed') ||
+        r.contains('Received');
   }
 
   /// `~M115` — machine identity.
@@ -151,6 +167,23 @@ class FlashforgePrinter {
     );
   }
 
+  /// `~M27` — real SD print progress: "SD printing byte 53/100" + "Layer: 303/674".
+  /// Only meaningful while printing; returns null when no SD activity is
+  /// reported (machine idle).
+  Future<({int bytePos, int totalBytes, int? layer, int? totalLayers})?>
+      sdProgress() async {
+    final r = await send('~M27');
+    final bm = RegExp(r'SD printing byte (\d+)/(\d+)').firstMatch(r);
+    if (bm == null) return null;
+    final lm = RegExp(r'Layer: (\d+)/(\d+)').firstMatch(r);
+    return (
+      bytePos: int.parse(bm.group(1)!),
+      totalBytes: int.parse(bm.group(2)!),
+      layer: lm != null ? int.parse(lm.group(1)!) : null,
+      totalLayers: lm != null ? int.parse(lm.group(2)!) : null,
+    );
+  }
+
   /// `~M114` — live toolhead position: "X:92.148 Y:110.801 Z:41.600 A:8986 B:0"
   /// The Z value is the real progress signal (compare against the max Z in
   /// the uploaded gcode).
@@ -162,27 +195,39 @@ class FlashforgePrinter {
     return (x: d(1), y: d(2), z: d(3));
   }
 
-  /// `~M119` — live machine state.
+  /// `~M119` — live machine state + build-plate endstops.
   Future<({String machineStatus, String moveMode, bool ledOn,
-          String currentFile})?>
+          String currentFile,
+          double? xMax, double? yMax, double? zMin})?>
       status() async {
     final r = await send('~M119');
     String? ms, mm;
     bool? led;
     String? file;
+    double? xMax, yMax, zMin;
     for (final line in r.split('\n')) {
       final l = line.trim();
       if (l.startsWith('MachineStatus:')) ms = l.substring(14).trim();
       if (l.startsWith('MoveMode:')) mm = l.substring(9).trim();
       if (l.startsWith('LED:')) led = l.substring(4).trim() == '1';
       if (l.startsWith('CurrentFile:')) file = l.substring(12).trim();
+      final es = RegExp(r'Endstop: X-max: ([\d.-]+) Y-max: ([\d.-]+) Z-min: ([\d.-]+)')
+          .firstMatch(l);
+      if (es != null) {
+        xMax = double.tryParse(es.group(1)!);
+        yMax = double.tryParse(es.group(2)!);
+        zMin = double.tryParse(es.group(3)!);
+      }
     }
     if (ms == null) return null;
     return (
       machineStatus: ms ?? '',
       moveMode: mm ?? '',
       ledOn: led ?? false,
-      currentFile: file ?? ''
+      currentFile: file ?? '',
+      xMax: xMax,
+      yMax: yMax,
+      zMin: zMin
     );
   }
 

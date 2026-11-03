@@ -6,6 +6,7 @@
 // protocol/flashforge-ad5x-lan.md (reverse-engineered + verified live).
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -90,31 +91,38 @@ class PrinterManager extends ChangeNotifier {
     final conn = FlashforgePrinter(printer.ip, port: printer.port);
     try {
       await conn.connect();
+      debugPrint('[FF] stage: tcp connected');
       final ok = await conn.handshake();
       if (!ok) {
         throw StateError('Handshake rejected by printer');
       }
+      debugPrint('[FF] stage: handshake OK');
       _conn = conn;
       printer.markOnline();
 
       // Identify (best effort — don't fail the connection over it).
       try {
         final id = await conn.identify();
+        debugPrint('[FF] stage: identify ${id != null ? id.machineType : 'null'}');
         if (id != null) {
           printer.applyM115(
               machineType: id.machineType,
               firmware: id.firmware,
               serial: id.serial);
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[FF] identify error: $e');
+      }
 
       // First immediate poll, then periodic.
       await _pollOnce(printer);
+      debugPrint('[FF] stage: first poll done, starting 5s loop');
       _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
         if (!_polling) _pollOnce(printer);
       });
       notifyListeners();
     } catch (e) {
+      debugPrint('[FF] connect failed ${printer.ip}:${printer.port} -> $e');
       conn.dispose();
       _conn = null;
       printer.markOffline();
@@ -137,8 +145,24 @@ class PrinterManager extends ChangeNotifier {
           moveMode: st.moveMode,
           ledOn: st.ledOn,
           currentFile: st.currentFile,
+          xMax: st.xMax,
+          yMax: st.yMax,
+          zMin: st.zMin,
         );
-        // Track when a print starts so we can estimate progress by time.
+        // Time-left estimate: if the total duration is unknown (print started
+        // outside the app), recover it from the "6h6m" token in the file name.
+        if (st.machineStatus == 'BUILDING' &&
+            printer.estimatedTotalSeconds == null &&
+            st.currentFile.isNotEmpty) {
+          final total = _parseTotalFromFilename(st.currentFile);
+          if (total != null && total > 0) {
+            printer.estimatedTotalSeconds = total.toDouble();
+          }
+        }
+        if (st.machineStatus != 'BUILDING') {
+          printer.estimatedTotalSeconds = null;
+        }
+        // Track when a print starts (client-side cross-check).
         if (st.machineStatus == 'BUILDING' && _printStartedAt == null) {
           _printStartedAt = DateTime.now();
         } else if (st.machineStatus != 'BUILDING') {
@@ -154,21 +178,96 @@ class PrinterManager extends ChangeNotifier {
           bedTarget: t.bedTarget,
         );
       }
-      // M114 Z position = real progress (when maxZ is known from the file).
+      // M114 Z position + M27 SD byte/layer = real progress while printing.
       if (st != null && st.machineStatus == 'BUILDING') {
         try {
           final pos = await conn.position();
           if (pos != null) printer.applyM114(zPosition: pos.z);
         } catch (_) {}
+        try {
+          final sd = await conn.sdProgress();
+          if (sd != null) {
+            printer.applyM27(
+              bytePos: sd.bytePos,
+              totalBytes: sd.totalBytes,
+              layer: sd.layer,
+              totalLayers: sd.totalLayers,
+            );
+          }
+        } catch (_) {}
       }
       notifyListeners();
-    } catch (_) {
+    } catch (e) {
       // Socket died mid-poll — the listener's onDone path handles it;
       // schedule a reconnect.
+      debugPrint('[FF] poll error: $e');
       _scheduleReconnect(printer);
     } finally {
       _polling = false;
     }
+  }
+
+  /// Orca/Flashforge gcode embeds the model preview as a base64 PNG between
+  /// "; thumbnail begin WxH" and "; thumbnail end" — decode the first block.
+  List<int>? _scanThumbnail(File file) {
+    try {
+      final begin = RegExp(r';\s*thumbnail begin \d+x\d+');
+      final b64 = <String>[];
+      var inBlock = false;
+      for (final line in file.readAsLinesSync()) {
+        if (!inBlock) {
+          if (begin.hasMatch(line)) inBlock = true;
+          continue;
+        }
+        if (RegExp(r'thumbnail end').hasMatch(line)) break;
+        final t = line.trim().replaceFirst(RegExp(r'^;\s*'), '');
+        if (t.isEmpty) continue;
+        if (RegExp(r'^[A-Za-z0-9+/=]+$').hasMatch(t)) b64.add(t);
+        if (b64.join('').length > 1 << 20) break; // 1MB cap
+      }
+      if (b64.isEmpty) return null;
+      final bytes = base64Decode(b64.join(''));
+      return bytes.isNotEmpty ? bytes : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Decoded gcode model-preview PNG bytes for the selected printer (set by
+  /// uploadGcode's thumbnail scan; null when the file had no preview).
+  List<int>? modelImage;
+
+  /// "6h 5m 49s" / "6h5m" / "32m 10s" -> seconds, or null.
+  static int? _parseDuration(String s) {
+    final h = RegExp(r'(\d+)\s*h').firstMatch(s);
+    final m = RegExp(r'(\d+)\s*m').firstMatch(s);
+    final sec = RegExp(r'(\d+)\s*s').firstMatch(s);
+    if (h == null && m == null && sec == null) return null;
+    return (h != null ? int.parse(h.group(1)!) * 3600 : 0) +
+        (m != null ? int.parse(m.group(1)!) * 60 : 0) +
+        (sec != null ? int.parse(sec.group(1)!) : 0);
+  }
+
+  /// Total duration from the gcode header:
+  /// "; estimated printing time (normal mode) = 6h 5m 49s".
+  int? _scanEstimatedTotal(File file) {
+    try {
+      for (final line in file.readAsLinesSync()) {
+        if (!line.contains('estimated printing time')) continue;
+        final eq = line.indexOf('=');
+        if (eq < 0) continue;
+        final d = _parseDuration(line.substring(eq + 1));
+        if (d != null && d > 0) return d;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Filename convention "Body15_PLA_6h6m.gcode" -> seconds, or null.
+  int? _parseTotalFromFilename(String name) {
+    final m = RegExp(r'(\d+)\s*h\s*(\d+)\s*m').firstMatch(name);
+    if (m == null) return null;
+    return int.parse(m.group(1)!) * 3600 + int.parse(m.group(2)!) * 60;
   }
 
   void _scheduleReconnect(Printer printer) {
@@ -220,9 +319,14 @@ class PrinterManager extends ChangeNotifier {
     if (conn == null || !conn.isOpen || printer == null) {
       throw Exception('No printer connected');
     }
-    // Scan the gcode for the max Z so we can report real (Z-based) progress.
+    // Scan the gcode for the max Z (Z-based progress denominator) and for the
+    // embedded model-preview PNG (Flashforge/Orca thumbnail block).
     final maxZ = _scanMaxZ(file);
     if (maxZ != null) printer.applyM114(zPosition: printer.zPosition, maxZ: maxZ);
+    modelImage = _scanThumbnail(file);
+    // Slicer's own total duration — much better than a name guess when present.
+    final total = _scanEstimatedTotal(file);
+    if (total != null) printer.estimatedTotalSeconds = total.toDouble();
 
     // Pause the poll loop for the duration of the transfer; the upload owns
     // the socket and polling would race it.
@@ -256,12 +360,12 @@ class PrinterManager extends ChangeNotifier {
     }
   }
 
-  /// Real progress 0.0-1.0 while printing: live Z position (M114) over the
-  /// max Z in the uploaded gcode. Null when unknown — UI shows elapsed time.
+  /// Real progress 0.0-1.0 while printing. Prefers M27 (SD byte position —
+  /// exact for any file the printer is playing); falls back to the Z estimate.
   double? estimateProgress() {
     final p = _selectedPrinter;
     if (p == null) return null;
-    return p.zProgress;
+    return p.sdProgress ?? p.zProgress;
   }
 
   /// Scan a gcode file for the largest Z coordinate (progress denominator).
@@ -383,11 +487,20 @@ class PrinterManager extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final jsonList = prefs.getStringList('paired_printers') ?? [];
     _printers.clear();
+    var migrated = false;
     for (final json in jsonList) {
       try {
-        _printers.add(Printer.fromJson(json));
+        final p = Printer.fromJson(json);
+        // The AD5X LAN protocol only exists on 8899. Entries saved by older
+        // app versions may carry a stale port (e.g. 80) — normalize it.
+        if (p.port != 8899) {
+          p.port = 8899;
+          migrated = true;
+        }
+        _printers.add(p);
       } catch (_) {}
     }
+    if (migrated) await _savePrinters();
     notifyListeners();
   }
 
