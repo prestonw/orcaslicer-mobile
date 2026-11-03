@@ -1,67 +1,107 @@
-// Printer model representing paired AD5X printers
+// Printer model — Flashforge AD5X state as reported over the 8899 LAN protocol
+// (see /tmp/orca-build/protocol/flashforge-ad5x-lan.md)
 
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 
-class Printer extends ChangeNotifier {
+class Printer {
   final String id;
   final String deviceID;
   final String name;
   final String ip;
   final int port;
-  final String? firmware;
+  String? firmware;
+  String? serial;
+  String? machineType;
   final DateTime pairedAt;
-  
+
   bool _online = false;
-  bool _printing = false;
-  double _progress = 0.0;
+  String _machineStatus = 'UNKNOWN'; // READY | BUILDING | ...
+  String _moveMode = '';
+  bool _ledOn = false;
+  String _currentFile = '';
   double _hotendTemp = 0.0;
+  double _hotendTarget = 0.0;
   double _bedTemp = 0.0;
-  int _fanSpeed = 0;
-  String _status = 'offline';
-  
+  double _bedTarget = 0.0;
+
   Printer({
     required this.id,
     required this.deviceID,
     required this.name,
     required this.ip,
-    this.port = 80,
+    this.port = 8899,
     this.firmware,
+    this.serial,
+    this.machineType,
     required this.pairedAt,
   });
-  
+
   bool get online => _online;
-  bool get printing => _printing;
-  double get progress => _progress;
+  String get machineStatus => _machineStatus;
+  String get moveMode => _moveMode;
+  bool get ledOn => _ledOn;
+  String get currentFile => _currentFile;
   double get hotendTemp => _hotendTemp;
+  double get hotendTarget => _hotendTarget;
   double get bedTemp => _bedTemp;
-  int get fanSpeed => _fanSpeed;
-  String get status => _status;
-  
-  // Update printer state from Bambu protocol telemetry
-  void updateState(Map<String, dynamic> telemetry) {
-    _online = true;
-    _printing = telemetry['printing'] ?? false;
-    _progress = (telemetry['progress'] as num?)?.toDouble() ?? 0.0;
-    _hotendTemp = (telemetry['hotend_temp'] as num?)?.toDouble() ?? 0.0;
-    _bedTemp = (telemetry['bed_temp'] as num?)?.toDouble() ?? 0.0;
-    _fanSpeed = telemetry['fan_speed'] as int? ?? 0;
-    _status = telemetry['status'] as String? ?? 'ready';
-    notifyListeners();
+  double get bedTarget => _bedTarget;
+
+  /// True while actively printing (M119 MachineStatus == BUILDING).
+  bool get printing => _machineStatus == 'BUILDING';
+
+  /// Human label for the machine status.
+  String get statusLabel {
+    switch (_machineStatus) {
+      case 'READY': return 'Ready';
+      case 'BUILDING': return 'Printing';
+      case 'IDLE': return 'Idle';
+      case 'ERROR': return 'Error';
+      case 'OFFLINE': return 'Offline';
+      default: return _machineStatus.isEmpty ? 'Unknown' : _machineStatus;
+    }
   }
-  
-  void markOnline() {
-    _online = true;
-    notifyListeners();
-  }
-  
+
+  void markOnline() { _online = true; }
+
   void markOffline() {
     _online = false;
-    _printing = false;
-    notifyListeners();
+    _machineStatus = 'OFFLINE';
+    _currentFile = '';
   }
-  
-  // Save printer config to local storage
+
+  void applyM119({
+    required String machineStatus,
+    required String moveMode,
+    required bool ledOn,
+    required String currentFile,
+  }) {
+    _online = true;
+    _machineStatus = machineStatus;
+    _moveMode = moveMode;
+    _ledOn = ledOn;
+    _currentFile = currentFile;
+  }
+
+  void applyM105({
+    required double hotendTemp,
+    required double hotendTarget,
+    required double bedTemp,
+    required double bedTarget,
+  }) {
+    _online = true;
+    _hotendTemp = hotendTemp;
+    _hotendTarget = hotendTarget;
+    _bedTemp = bedTemp;
+    _bedTarget = bedTarget;
+  }
+
+  void applyM115({String? machineType, String? firmware, String? serial}) {
+    _online = true;
+    if (machineType != null && machineType.isNotEmpty) this.machineType = machineType;
+    if (firmware != null && firmware.isNotEmpty) this.firmware = firmware;
+    if (serial != null && serial.isNotEmpty) this.serial = serial;
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -70,22 +110,28 @@ class Printer extends ChangeNotifier {
       'ip': ip,
       'port': port,
       'firmware': firmware,
+      'serial': serial,
+      'machineType': machineType,
       'pairedAt': pairedAt.toIso8601String(),
     };
   }
-  
+
   factory Printer.fromMap(Map<String, dynamic> map) {
     return Printer(
       id: map['id'] as String,
-      deviceID: map['deviceID'] as String,
-      name: map['name'] as String,
+      deviceID: map['deviceID'] as String? ?? (map['id'] as String),
+      name: map['name'] as String? ?? 'Printer',
       ip: map['ip'] as String,
-      port: map['port'] as int? ?? 80,
+      port: map['port'] as int? ?? 8899,
       firmware: map['firmware'] as String?,
-      pairedAt: DateTime.parse(map['pairedAt'] as String),
+      serial: map['serial'] as String?,
+      machineType: map['machineType'] as String?,
+      pairedAt: map['pairedAt'] != null
+          ? DateTime.parse(map['pairedAt'] as String)
+          : DateTime.now(),
     );
   }
-  
+
   String toJson() => json.encode(toMap());
   factory Printer.fromJson(String source) => Printer.fromMap(json.decode(source));
 }

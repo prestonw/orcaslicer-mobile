@@ -27,7 +27,9 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     
     _screens = [
-      _PrintersList(),
+      _PrintersList(
+        onAddPrinter: () => setState(() => _currentIndex = 1),
+      ),
       PrinterSetupScreen(),
       PrintQueueScreen(),
     ];
@@ -73,6 +75,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
 // Printer list showing paired AD5X printers
 class _PrintersList extends StatelessWidget {
+  final VoidCallback onAddPrinter;
+  const _PrintersList({required this.onAddPrinter});
+
   @override
   Widget build(BuildContext context) {
     final printers = context.watch<PrinterManager>().printers;
@@ -96,7 +101,7 @@ class _PrintersList extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: () => context.read<PrinterManager>(),
+              onPressed: onAddPrinter,
               icon: const Icon(Icons.add),
               label: const Text('Add Printer'),
             ),

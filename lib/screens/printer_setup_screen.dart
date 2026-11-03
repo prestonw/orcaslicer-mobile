@@ -64,6 +64,46 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
     }
   }
   
+  Future<void> _scanLan() async {
+    setState(() {
+      _scanning = true;
+      _lastError = null;
+    });
+
+    try {
+      final found =
+          await context.read<PrinterManager>().scanLocalNetwork();
+      if (found.isEmpty) {
+        setState(() {
+          _lastError =
+              'No printers found on the local network. Try entering the IP manually.';
+        });
+      } else if (found.length == 1) {
+        // Auto-fill from the single candidate
+        _ipController.text = found.first.ip;
+        if (_deviceIDController.text.isEmpty) {
+          _deviceIDController.text = found.first.deviceID;
+        }
+        setState(() {
+          _lastError = 'Found ${found.first.name} — press "Pair Printer".';
+        });
+      } else {
+        setState(() {
+          _lastError =
+              'Found ${found.length} candidates: ${found.map((p) => p.ip).join(', ')}';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _lastError = e.toString();
+      });
+    } finally {
+      setState(() {
+        _scanning = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
@@ -162,7 +202,7 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: _scanning ? null : () {},
+                        onPressed: _scanning ? null : _scanLan,
                         icon: const Icon(Icons.search),
                         label: const Text('Scan LAN'),
                       ),
